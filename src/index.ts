@@ -1,219 +1,106 @@
-import { Worker } from "@notionhq/workers"
+import crypto from "crypto"
+import { Worker, WebhookVerificationError } from "@notionhq/workers"
 import { j } from "@notionhq/workers/schema-builder"
+import { config } from "./config.js"
+import { generateGeminiText, testGeminiAuthentication } from "./gemini.js"
+import { addDays, createReportPage, readActivities, validateDateOnly } from "./notion.js"
+import { buildReportPrompt } from "./report-guide.js"
+import { calculateScheduledReportPeriod } from "./schedule.js"
 
 const worker = new Worker()
 export default worker
 
-type Activity = Record<string, unknown>
-
-const text = (value: unknown) =>
-	typeof value === "string" ? value.trim() : ""
-
-const firstText = (activity: Activity, keys: string[]) => {
-	for (const key of keys) {
-		const value = text(activity[key])
-		if (value) return value
-	}
-	return ""
+function displayDate(dateOnly: string) {
+  const [year, month, day] = dateOnly.split("-")
+  return `${day}/${month}/${year}`
 }
 
-const dateOnly = (date: Date) => date.toISOString().slice(0, 10)
-
-function previousWeek(referenceDate?: string | null) {
-	const reference = referenceDate
-		? new Date(`${referenceDate.slice(0, 10)}T12:00:00Z`)
-		: new Date()
-	if (Number.isNaN(reference.getTime())) {
-		throw new Error("referenceDate must be an ISO date.")
-	}
-
-	const day = reference.getUTCDay() || 7
-	const start = new Date(reference)
-	start.setUTCDate(reference.getUTCDate() - day - 6)
-	const end = new Date(start)
-	end.setUTCDate(start.getUTCDate() + 6)
-
-	return { start: dateOnly(start), end: dateOnly(end) }
+async function collectEvidence(notion: any, startDate: string, endDate: string) {
+  const start = validateDateOnly(startDate)
+  const end = validateDateOnly(endDate)
+  if (start > end) throw new Error("startDate must not be after endDate")
+  const activities = await readActivities(notion, start, end)
+  const evidence = {
+    reportPeriod: { startDate: start, endDate: end },
+    nextPeriod: { startDate: addDays(end, 1), endDate: addDays(end, 7) },
+    source: { database: "Activities (demo test)", dataSourceId: config.activitiesDataSourceId },
+    totalActivities: activities.length,
+    activities,
+  }
+  return { start, end, activities, evidence, evidenceJson: JSON.stringify(evidence, null, 2) }
 }
 
-function activityDate(activity: Activity) {
-	return firstText(activity, [
-		"activityDate",
-		"Activity Date",
-		"date",
-		"Date",
-		"createdTime",
-	])
+async function generateReport(notion: any, startDate: string, endDate: string) {
+  const result = await collectEvidence(notion, startDate, endDate)
+  const title = `Demo Sales Report ${displayDate(result.start)} - ${displayDate(result.end)}`
+  const startedAt = new Date().toISOString()
+  try {
+    const reportMarkdown = await generateGeminiText(
+      buildReportPrompt(result.evidenceJson, result.start, result.end),
+      "Bạn chịu trách nhiệm hoàn toàn về phân tích, nội dung, cấu trúc và định dạng của báo cáo. Output sẽ được chèn nguyên văn vào Notion.",
+    )
+    if (!reportMarkdown.trim()) throw new Error("Gemini returned empty report content")
+    const page = await createReportPage(notion, title, reportMarkdown)
+    return {
+      status: "completed", pageId: page.id, pageUrl: page.url ?? null,
+      startDate: result.start, endDate: result.end, totalActivities: result.activities.length,
+      startedAt, completedAt: new Date().toISOString(), notificationSent: false, outputInsertedUnchanged: true,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    try {
+      await createReportPage(notion, `${title} — Failed`, `#### ❌ Tạo báo cáo thất bại\n\n- Kỳ dữ liệu: ${result.start} đến ${result.end}\n- Activities đã đọc: ${result.activities.length}\n- Lỗi: ${message}`)
+    } catch {}
+    throw error
+  }
 }
 
-function classifyParty(activity: Activity) {
-	const value = firstText(activity, [
-		"counterpartyType",
-		"Counterparty Type",
-		"partyType",
-		"Party Type",
-		"relationshipType",
-		"Relationship Type",
-		"activityType",
-		"Activity Type",
-	]).toLowerCase()
-
-	if (
-		value.includes("partner") ||
-		value.includes("vendor") ||
-		value.includes("đối tác") ||
-		value.includes("hãng")
-	) {
-		return "partner"
-	}
-	if (
-		value.includes("customer") ||
-		value.includes("client") ||
-		value.includes("khách hàng")
-	) {
-		return "customer"
-	}
-	return "unclassified"
-}
-
-function opportunityKey(activity: Activity) {
-	return (
-		firstText(activity, [
-			"opportunityProduct",
-			"Opportunity Product",
-			"opportunity",
-			"Opportunity",
-			"account",
-			"Account",
-		]) || "Không xác định"
-	)
-}
-
-function healthFromOutcome(outcome: string) {
-	const normalized = outcome.toLowerCase()
-	if (normalized.includes("positive")) return "Healthy"
-	if (normalized.includes("negative")) return "At Risk"
-	return "Watch"
+function verifyScheduledWebhook(rawBody: string, headers: Record<string, string | string[] | undefined>) {
+  const secret = process.env.WORKER_WEBHOOK_SECRET
+  if (!secret) throw new WebhookVerificationError("WORKER_WEBHOOK_SECRET not configured")
+  const rawSignature = headers["x-weekly-report-signature"]
+  const signature = Array.isArray(rawSignature) ? rawSignature[0] : rawSignature
+  if (!signature?.startsWith("sha256=")) throw new WebhookVerificationError("Missing scheduled report signature")
+  const expected = `sha256=${crypto.createHmac("sha256", secret).update(rawBody).digest("hex")}`
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    throw new WebhookVerificationError("Invalid scheduled report signature")
+  }
 }
 
 worker.tool("prepareActivitiesJson", {
-	title: "Prepare weekly sales activities",
-	description:
-		"Filter Activities to the previous Monday-Sunday period, split customer and partner interactions, and derive Opportunity Health from the latest meaningful outcome. Call this before drafting the weekly report.",
-	hints: { readOnlyHint: true },
-	schema: j.object({
-		activitiesJson: j
-			.string()
-			.describe("JSON array of CRM Activity objects loaded by the agent."),
-		referenceDate: j
-			.string()
-			.describe("Optional ISO date used to determine the previous week.")
-			.nullable(),
-		periodStart: j
-			.string()
-			.describe("Optional explicit ISO start date; use together with periodEnd.")
-			.nullable(),
-		periodEnd: j
-			.string()
-			.describe("Optional explicit ISO end date; use together with periodStart.")
-			.nullable(),
-	}),
-	outputSchema: j.object({
-		periodStart: j.string(),
-		periodEnd: j.string(),
-		customerActivitiesJson: j.string(),
-		partnerActivitiesJson: j.string(),
-		unclassifiedActivitiesJson: j.string(),
-		opportunityHealthJson: j.string(),
-	}),
-	execute: ({ activitiesJson, referenceDate, periodStart, periodEnd }) => {
-		const parsed: unknown = JSON.parse(activitiesJson)
-		if (!Array.isArray(parsed)) {
-			throw new Error("activitiesJson must contain a JSON array.")
-		}
-
-		if ((periodStart && !periodEnd) || (!periodStart && periodEnd)) {
-			throw new Error("periodStart and periodEnd must be provided together.")
-		}
-		const period =
-			periodStart && periodEnd
-				? { start: periodStart.slice(0, 10), end: periodEnd.slice(0, 10) }
-				: previousWeek(referenceDate)
-		if (period.start > period.end) {
-			throw new Error("periodStart must be on or before periodEnd.")
-		}
-		const activities = (parsed as Activity[]).filter((activity) => {
-			const value = activityDate(activity).slice(0, 10)
-			return value >= period.start && value <= period.end
-		})
-
-		const customer = activities.filter(
-			(activity) => classifyParty(activity) === "customer",
-		)
-		const partner = activities.filter(
-			(activity) => classifyParty(activity) === "partner",
-		)
-		const unclassified = activities.filter(
-			(activity) => classifyParty(activity) === "unclassified",
-		)
-
-		const latest = new Map<string, Activity>()
-		for (const activity of [...activities].sort((a, b) =>
-			activityDate(a).localeCompare(activityDate(b)),
-		)) {
-			latest.set(opportunityKey(activity), activity)
-		}
-
-		const health = [...latest.entries()].map(([opportunity, activity]) => {
-			const outcome = firstText(activity, [
-				"activityOutcome",
-				"Activity Outcome",
-				"outcome",
-				"Outcome",
-			])
-			return {
-				opportunity,
-				health: healthFromOutcome(outcome),
-				outcome: outcome || "Không có outcome rõ ràng",
-				latestActivityDate: activityDate(activity),
-			}
-		})
-
-		return {
-			periodStart: period.start,
-			periodEnd: period.end,
-			customerActivitiesJson: JSON.stringify(customer),
-			partnerActivitiesJson: JSON.stringify(partner),
-			unclassifiedActivitiesJson: JSON.stringify(unclassified),
-			opportunityHealthJson: JSON.stringify(health),
-		}
-	},
+  title: "Prepare Activities JSON",
+  description: "Read Activities between a requested start and end date and return normalized JSON evidence.",
+  schema: j.object({ startDate: j.string(), endDate: j.string() }),
+  hints: { readOnlyHint: true },
+  execute: async ({ startDate, endDate }, { notion }) => {
+    const result = await collectEvidence(notion, startDate, endDate)
+    return { evidence: result.evidence, evidenceJson: result.evidenceJson }
+  },
 })
 
-worker.tool("getWeeklyReportWorkflow", {
-	title: "Get weekly sales report workflow",
-	description:
-		"Return the fixed workflow and report structure used by Sales Weekly Report Agent. Use it together with the agent's instructions; Notion AI remains responsible for reasoning and writing.",
-	hints: { readOnlyHint: true },
-	schema: j.object({}),
-	outputSchema: j.object({
-		workflow: j.string(),
-		reportSections: j.array(j.string()),
-		healthRules: j.string(),
-	}),
-	execute: () => ({
-		workflow:
-			"Load the previous Monday-Sunday Activities from the Test worker sales weekly report area and related Opportunity Products; call prepareActivitiesJson; create or update one report page under List of reports in the Dùng thử các tính năng phần mềm area. Do not write to the production Sales Weekly Reports database. Do not send notifications or ping anyone.",
-		reportSections: [
-			"Tổng quan nhanh",
-			"Opportunity Health",
-			"Điểm nổi bật trong tuần",
-			"Cần chú ý / rủi ro",
-			"Trọng tâm tuần tới",
-			"Cần sếp hỗ trợ",
-			"Kết luận",
-		],
-		healthRules:
-			"Positive → Healthy; Negative → At Risk; Neutral, Waiting, or Blocked → Watch.",
-	}),
+worker.tool("generateSalesReport", {
+  title: "Generate sales report with Gemini",
+  description: "Manually generate a report for a requested date range.",
+  schema: j.object({ startDate: j.string(), endDate: j.string() }),
+  execute: async ({ startDate, endDate }, { notion }) => generateReport(notion, startDate, endDate),
+})
+
+worker.webhook("scheduledWeeklyReport", {
+  title: "Scheduled weekly sales report",
+  description: "Authenticated webhook called by GitHub Actions to generate the configured weekly report.",
+  execute: async (events, { notion }) => {
+    for (const event of events) {
+      verifyScheduledWebhook(event.rawBody, event.headers)
+      const period = calculateScheduledReportPeriod()
+      await generateReport(notion, period.startDate, period.endDate)
+    }
+  },
+})
+
+worker.tool("testGeminiConnection", {
+  title: "Test Gemini connection",
+  description: "Verify the configured Gemini API key and network connection.",
+  schema: j.object({}),
+  hints: { readOnlyHint: true },
+  execute: async () => testGeminiAuthentication(),
 })

@@ -1,0 +1,30 @@
+name: Generate weekly sales report
+
+on:
+  schedule:
+    # GitHub cron dùng UTC: 23:00 thứ Bảy UTC = 06:00 sáng Chủ nhật Việt Nam.
+    - cron: "0 23 * * 6"
+  workflow_dispatch:
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Notion Worker
+        env:
+          WORKER_WEBHOOK_URL: ${{ secrets.WORKER_WEBHOOK_URL }}
+          WORKER_WEBHOOK_SECRET: ${{ secrets.WORKER_WEBHOOK_SECRET }}
+        shell: bash
+        run: |
+          if [[ -z "$WORKER_WEBHOOK_URL" || -z "$WORKER_WEBHOOK_SECRET" ]]; then
+            echo "Missing WORKER_WEBHOOK_URL or WORKER_WEBHOOK_SECRET."
+            exit 1
+          fi
+          body='{"trigger":"github-actions","mode":"scheduled"}'
+          digest=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$WORKER_WEBHOOK_SECRET" | awk '{print $2}')
+          curl --fail-with-body \
+            --request POST \
+            --url "$WORKER_WEBHOOK_URL" \
+            --header "Content-Type: application/json" \
+            --header "x-weekly-report-signature: sha256=$digest" \
+            --data "$body"

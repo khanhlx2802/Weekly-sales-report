@@ -1,21 +1,33 @@
-# agent_weekly_report
+# Weekly Sales Report Worker
 
-Deterministic helper Worker for the DIBIZ Sales Weekly Report Agent.
+Notion Worker đọc Activities theo kỳ báo cáo, gửi JSON cùng Writing Guide cho Gemini, rồi tạo báo cáo trong Notion. GitHub Actions gọi webhook có chữ ký HMAC để chạy tự động.
 
 ## Capabilities
 
-- `prepareActivitiesJson`: filters either the previous Monday-Sunday period or
-  an explicit `periodStart`/`periodEnd` range, separates customer and partner
-  interactions, and maps the latest activity outcome to Opportunity Health.
-- `getWeeklyReportWorkflow`: returns the approved report workflow, section
-  order, and health rules.
+- `prepareActivitiesJson`: đọc và chuẩn hóa Activities theo khoảng ngày.
+- `generateSalesReport`: chạy thủ công với `startDate` và `endDate`.
+- `scheduledWeeklyReport`: webhook dành cho GitHub Actions.
+- `testGeminiConnection`: kiểm tra kết nối Gemini.
 
-The Worker does not call Gemini, Claude, or another external model. A Notion
-Custom Agent performs the AI reasoning and writes the report.
+## Mặc định
 
-## Validate and deploy
+- Lịch chạy: 06:00 sáng Chủ nhật, giờ Việt Nam.
+- Kỳ dữ liệu: thứ Hai đến thứ Bảy gần nhất.
+- Chỉnh ngày tại `src/schedule-config.ts`.
+- Chỉnh giờ tại `.github/workflows/weekly-report.yml`.
+
+## Secrets
+
+Worker: `NOTION_API_TOKEN`, `GEMINI_API_KEY`, `WORKER_WEBHOOK_SECRET`.
+GitHub Actions: `WORKER_WEBHOOK_URL`, `WORKER_WEBHOOK_SECRET`.
+
+## Kiểm tra và deploy
 
 ```bash
+npm install
 npm run check
-ntn workers deploy
+ntn workers deploy --json
+ntn workers webhooks list
 ```
+
+Không commit token thật vào repository.
