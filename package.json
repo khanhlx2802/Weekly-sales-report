@@ -1,6 +1,6 @@
 {
-  "name": "agent-weekly-report",
-  "version": "0.0.0",
+  "name": "weekly-sales-report-worker",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
