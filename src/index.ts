@@ -12,8 +12,8 @@ const worker = new Worker()
 export default worker
 
 function displayDate(dateOnly: string) {
-  const [year, month, day] = dateOnly.split("-")
-  return `${day}/${month}/${year}`
+  const [, month, day] = dateOnly.split("-")
+  return `${day}/${month}`
 }
 
 async function collectEvidence(notion: any, startDate: string, endDate: string) {
@@ -23,8 +23,8 @@ async function collectEvidence(notion: any, startDate: string, endDate: string) 
   const activities = await readActivities(notion, start, end)
   const evidence = {
     reportPeriod: { startDate: start, endDate: end },
-    nextPeriod: { startDate: addDays(end, 1), endDate: addDays(end, 7) },
-    source: { database: "Activities (demo test)", dataSourceId: config.activitiesDataSourceId },
+    nextPeriod: { startDate: addDays(end, 2), endDate: addDays(end, 7) },
+    source: { database: "Activities", dataSourceId: config.activitiesDataSourceId },
     totalActivities: activities.length,
     activities,
   }
@@ -33,7 +33,7 @@ async function collectEvidence(notion: any, startDate: string, endDate: string) 
 
 async function generateReport(notion: any, startDate: string, endDate: string) {
   const result = await collectEvidence(notion, startDate, endDate)
-  const title = `Demo Sales Report ${displayDate(result.start)} - ${displayDate(result.end)}`
+  const title = `Tuần ${displayDate(result.start)} - ${displayDate(result.end)} (demo)`
   const startedAt = new Date().toISOString()
   try {
     const reportMarkdown = await generateGeminiText(
