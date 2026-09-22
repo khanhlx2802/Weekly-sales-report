@@ -13,4 +13,4 @@ dist/
 workers.json
 
 # Telegram bot credentials (DO NOT COMMIT)
-bot-telegram.txt
+.env-telegram
