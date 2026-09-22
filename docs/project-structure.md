@@ -1,240 +1,149 @@
-# Project Structure — Weekly Sales Report Worker
+# Project Structure - Weekly Sales Report Worker
 
-> Mô tả vai trò và chức năng của từng file trong dự án **Weekly Sales Report Worker**.
+Mô tả vai trò của từng file và luồng dữ liệu thực tế trong dự án.
 
----
+## Cấu trúc thư mục
 
-## Tổng quan kiến trúc
-
-```
+```text
 Weekly-sales-report/
-├── .env.example                        # Template biến môi trường
-├── package.json                        # Metadata & dependencies
-├── package-lock.json                   # Snapshot phụ thuộc đã lock
-├── README.md                           # Hướng dẫn dự án
-├── tsconfig.json                       # Cấu hình TypeScript
-├── workers.json                        # Cấu hình Notion Worker
-├── .github/
-│   └── workflows/
-│       └── weekly-report.yml           # GitHub Actions schedule
+├── .env.example
+├── .env-telegram                 # Credential local, bị Git ignore
+├── package.json
+├── package-lock.json
+├── README.md
+├── tsconfig.json
+├── workers.json
+├── .github/workflows/
+│   └── weekly-report.yml         # Cron và trigger thủ công
 ├── docs/
-│   ├── architecture.md                 # Sơ đồ kiến trúc hệ thống
-│   ├── github-actions-scheduling.md    # Hướng dẫn schedule GitHub Actions
-│   └── project-structure.md            # ← File này
+│   ├── architecture.md
+│   ├── github-actions-scheduling.md
+│   └── project-structure.md
 ├── prompts/
-│   └── weekly-report-guide.md          # Prompt/Writing Guide cho Gemini
+│   └── weekly-report-guide.md
 └── src/
-    ├── config.ts                       # Cấu hình chung (IDs, endpoints, timeouts)
-    ├── gemini.ts                       # Kết nối API Gemini
-    ├── index.ts                        # Entry point – định nghĩa tools & webhooks
-    ├── notion.ts                       # Tương tác Notion API (đọc Activities, tạo page)
-    ├── report-guide.ts                 # Xây dựng prompt báo cáo cho Gemini
-    ├── schedule-config.ts              # Cấu hình lịch chạy (ngày, giờ, timezone)
-    └── schedule.ts                     # Logic tính toán kỳ báo cáo tự động
+    ├── config.ts                 # Notion IDs, Gemini endpoints, retry config
+    ├── gemini.ts                 # Gọi Gemini API
+    ├── index.ts                  # Worker entry point, tools và webhook
+    ├── notion.ts                 # Đọc Activities và tạo report page
+    ├── report-guide.ts           # Dựng prompt gửi Gemini
+    ├── schedule-config.ts        # Ngày, giờ và timezone lịch chạy
+    ├── schedule.ts               # Tính kỳ báo cáo
+    └── telegram.ts               # Gửi notification qua Telegram
 ```
-
----
 
 ## Root files
 
 ### `.env.example`
-Template file chứa các biến môi trường bắt buộc:
-- `NOTION_API_TOKEN` — Token xác thực Notion.
-- `GEMINI_API_KEY` — API key cho Gemini.
-- `WORKER_WEBHOOK_SECRET` — Secret dùng để ký xác thực webhook từ GitHub Actions.
+Template cho các biến môi trường:
 
-> ⚠️ Không commit giá trị secret thật vào repository.
+- `NOTION_API_TOKEN`
+- `GEMINI_API_KEY`
+- `WORKER_WEBHOOK_SECRET`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
 
----
+Không điền secret thật vào file này.
 
-### `package.json`
-Metadata của project:
-- **Name:** `weekly-sales-report-worker` (version `0.2.0`).
-- **Type:** ESM (`"type": "module"`).
-- **Scripts:** `build` (biên dịch TypeScript), `check` (type-check không emit).
-- **Dependencies:** `@notionhq/workers` — SDK Notion Worker.
-- **DevDependencies:** `typescript`, `tsx` (chạy TS không cần compile), `@types/node`.
-- **Engines:** Node.js `>=22.0.0`, npm `>=10.9.2`.
+### `.env-telegram`
+File local chứa credential Telegram. File được Git ignore và không được commit. Runtime Worker vẫn đọc `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID` từ environment secrets.
 
----
+### `package.json`, `package-lock.json`, `tsconfig.json`
 
-### `package-lock.json`
-Snapshot lockfile ghi lại chính xác phiên bản mọi dependency (direct & transitive). Đảm bảo cài đặt giống nhau trên mọi máy.
-
----
-
-### `README.md`
-Tài liệu hướng dẫn chính của dự án:
-- Mô tả ngắn gọn: Notion Worker đọc Activities, gửi JSON + Writing Guide cho Gemini, tạo báo cáo trong Notion.
-- Liệt kê 4 capabilities: `prepareActivitiesJson`, `generateSalesReport`, `scheduledWeeklyReport`, `testGeminiConnection`.
-- Mặc định: chạy 06:00 Chủ nhật, kỳ dữ liệu thứ Hai–Thứ Bảy.
-- Secrets cần thiết cho cả Worker và GitHub Actions.
-- Hướng dẫn kiểm tra & deploy.
----
-
-## `.github/workflows/`
-
-### `.github/workflows/weekly-report.yml`
-GitHub Actions workflow tự động trigger báo cáo hàng tuần:
-- **Schedule:** Cron `0 23 * * 6` (23:00 UTC thứ Bảy = 06:00 Chủ nhật giờ Việt Nam).
-- **workflow_dispatch:** Cho phép chạy thủ công.
-- **Bước:** Gửi POST request đến Notion Worker webhook, body được ký HMAC-SHA256 bằng `WORKER_WEBHOOK_SECRET`.
-- **Secrets:** `WORKER_WEBHOOK_URL`, `WORKER_WEBHOOK_SECRET` (lưu trong GitHub Secrets, không trong code).
-
----
-
-## `docs/`
-
-### `docs/architecture.md`
-Sơ đồ kiến trúc 7 bước của hệ thống:
-1. GitHub Actions trigger theo cron hoặc `workflow_dispatch`.
-2. Workflow ký request bằng HMAC-SHA256.
-3. Notion Worker xác thực chữ ký, tính kỳ báo cáo.
-4. Worker đọc Activities trực tiếp bằng Notion API.
-5. Worker gửi Activities JSON + Writing Guide cho Gemini.
-6. Gemini phân tích, viết, định dạng báo cáo.
-7. Worker chèn nguyên văn output vào page con của `List of reports`.
-
-Ngoài ra còn mô tả **Secret boundaries** — phân quyền secret giữa Worker và GitHub Actions.
-
----
-
-### `docs/github-actions-scheduling.md`
-Hướng dẫn chi tiết về lịch chạy:
-- Mặc định: 06:00 Chủ nhật giờ Việt Nam (cron UTC là `0 23 * * 6`).
-- Kỳ dữ liệu: thứ Hai đến thứ Bảy gần nhất.
-- Nơi chỉnh cấu hình: giờ/ngày trigger trong `.github/workflows/weekly-report.yml`, ngày bắt đầu/kết thúc trong `src/schedule-config.ts`.
-- Cách lấy và cấu hình GitHub Actions secrets.
-
----
-
-### `docs/project-structure.md` *(đang tạo)*
-File này — mô tả chi tiết chức năng từng file trong toàn bộ dự án.
-
-
----
-
-### `tsconfig.json`
-Cấu hình TypeScript compiler:
-- **target:** ES2020, **module:** nodenext (Node.js ESM).
-- **strict:** true — kiểm gắt gàng.
-- **rootDir:** `./src`, **outDir:** `./dist`.
-- **resolveJsonModule:** true — cho phép import JSON.
-
----
+- Project dùng ESM và TypeScript strict mode.
+- Yêu cầu Node.js >= 22 và npm >= 10.9.2.
+- `npm run check`: type-check không tạo output.
+- `npm run build`: biên dịch `src/` vào `dist/`.
+- Dependency runtime chính là `@notionhq/workers`.
 
 ### `workers.json`
-Cấu hình triển khai Notion Worker:
-- `version`: phiên bản schema config.
-- `environment`: `"prod"` (môi trường production).
-- `workspaceId`: ID workspace Notion.
-- `workerId`: ID worker duy nhất.
----
+Cấu hình Notion Worker production gồm workspace ID và worker ID.
 
-## `prompts/`
+### `.github/workflows/weekly-report.yml`
+Chạy lúc 23:00 UTC thứ Bảy, tương đương 06:00 Chủ nhật giờ Việt Nam, hoặc qua `workflow_dispatch`. Workflow tạo HMAC-SHA256 từ request body rồi gọi webhook Worker.
+
+## Documentation and prompts
+
+### `docs/architecture.md`
+Mô tả luồng GitHub Actions -> Notion Worker -> Notion Activities -> Gemini -> Notion report page -> Telegram, cùng các nhánh lỗi và ranh giới secret.
+
+### `docs/github-actions-scheduling.md`
+Giải thích cron UTC, kỳ dữ liệu thứ Hai đến thứ Bảy và hai GitHub Actions secrets cần cấu hình.
 
 ### `prompts/weekly-report-guide.md`
-Writing Guide (prompt system) dành cho Gemini — tác giả duy nhất của báo cáo:
-- **Nguyên tắc:** Không bịa dữ liệu, không tự gắn Opportunity Product, tách Customer/Partner, nêu rõ kết quả & rủi ro, dùng Notion-flavored Markdown.
-- **Sections bắt buộc:** 📌 Tổng quan nhanh, 🚦 Opportunity Health, ⭐ Diễn biến nổi bật, ⚠️ Cần chú ý/rủi ro, 🎯 Trọng tâm tuần tới, 📅 Lịch làm việc Lãnh đạo.
-- **Opportunity Health mapping:** Positive → Healthy, Negative → At Risk, Neutral/Waiting/Blocked → Watch.
+Writing Guide quy định Gemini là tác giả duy nhất của báo cáo, không bịa dữ liệu và phải trả về Notion-flavored Markdown với sáu section bắt buộc.
 
----
-
-## `src/`
+## Source files
 
 ### `src/config.ts`
-Cấu hình chung (constant) của ứng dụng:
-- `activitiesDataSourceId` — ID database Activities trong Notion.
-- `reportParentPageId` — ID page cha (`List of reports`) để tạo page con.
-- `geminiModel` — Model Gemini sử dụng (`gemini-3.6-flash`).
-- `geminiEndpoint` / `geminiAuthEndpoint` — URL API Gemini.
-- `geminiMaxAttempts` (2), `geminiAttemptTimeoutMs` (70s), `geminiRetryDelayMs` (5s) — Cấu hình retry.
-
----
-
-### `src/gemini.ts`
-Module kết nối Gemini API:
-- **`generateGeminiText(prompt, systemInstruction)`:** Gửi prompt đến Gemini với retry logic (2 lần), timeout 70s, retry delay 5s. Tự động trích xuất text từ response.
-- **`testGeminiAuthentication()`:** Kiểm tra kết nối Gemini bằng cách gọi endpoint kiểm tra model.
-- Đọc `GEMINI_API_KEY` từ biến môi trường.
-- Xử lý lỗi retry cho các status: 429, 500, 502, 503, 504.
-
----
+Chứa `activitiesDataSourceId`, `reportParentPageId`, model và endpoint Gemini, timeout 70 giây, retry tối đa 2 lần và delay 5 giây. Notion IDs là resource IDs, không phải secret.
 
 ### `src/index.ts`
-**Entry point chính** — đăng ký worker với Notion:
-- Khởi tạo `Worker` và export default.
-- Định nghĩa **4 công cụ (tools/webhooks)**:
+Khởi tạo Worker và đăng ký:
 
-| Tool/Webhook | Mô tả |
-|---|---|
-| `prepareActivitiesJson` | Đọc Activities theo ngày, trả về JSON evidence (read-only). |
-| `generateSalesReport` | Tạo báo cáo thủ công với `startDate` + `endDate`. |
-| `scheduledWeeklyReport` | Webhook xác thực HMAC, tự tính kỳ báo cáo và tạo report. |
-| `testGeminiConnection` | Kiểm tra kết nối Gemini (read-only). |
+| Tên | Chức năng |
+| --- | --- |
+| `prepareActivitiesJson` | Đọc Activities theo ngày và trả evidence JSON; read-only. |
+| `generateSalesReport` | Tạo report thủ công từ `startDate` và `endDate`. |
+| `scheduledWeeklyReport` | Webhook có HMAC, tự tính kỳ rồi tạo report. |
+| `testGeminiConnection` | Kiểm tra Gemini API; read-only. |
 
-- **`collectEvidence()`:** Đọc Activities, đóng gói thành JSON evidence.
-- **`generateReport()`:** Gửi evidence cho Gemini, tạo page Notion chứa kết quả. Nếu lỗi → tạo page ghi chú thất bại.
-- **`verifyScheduledWebhook()`:** Xác thực chữ ký HMAC-SHA256 từ GitHub Actions.
+Các hàm chính:
 
----
+- `collectEvidence()`: validate ngày, đọc Activities và đóng gói evidence JSON.
+- `generateReport()`: gọi Gemini, tạo page Notion, rồi gửi Telegram. Nếu Gemini hoặc Notion thất bại thì cố tạo page `{title} — Failed`; lỗi Telegram chỉ được log.
+- `verifyScheduledWebhook()`: kiểm tra header `x-weekly-report-signature` bằng timing-safe comparison.
 
 ### `src/notion.ts`
-Module tương tác Notion API:
-- **`validateDateOnly(value)`:** Kiểm tra định dạng ngày `YYYY-MM-DD`.
-- **`addDays(dateOnly, days)`:** Cộng thêm N ngày vào date string.
-- **`readActivities(notion, startDate, endDate)`:** Query database Activities theo khoảng ngày, hỗ trợ pagination, chuẩn hóa property (title, rich_text, date, select, multi_select...).
-- **`createReportPage(notion, title, markdown)`:** Tạo page mới dưới `reportParentPageId` với title và markdown content.
 
----
+- Validate ngày `YYYY-MM-DD` và cộng ngày theo UTC.
+- Query Data Source hoặc Database theo property `Date`.
+- Hỗ trợ pagination với `page_size: 100`.
+- Chuẩn hóa title, rich text, date, select, status, people, relation và các property Notion khác.
+- Tạo report page dưới `reportParentPageId` bằng Markdown.
+
+### `src/gemini.ts`
+
+- Đọc `GEMINI_API_KEY` từ environment.
+- Gửi system instruction và evidence prompt đến Gemini.
+- Trích xuất text từ các dạng response khác nhau.
+- Retry lỗi `429`, `500`, `502`, `503`, `504`; mỗi lần có timeout 70 giây.
+- `testGeminiAuthentication()` kiểm tra API key bằng auth endpoint.
 
 ### `src/report-guide.ts`
-Xây dựng prompt (system message + user message) gửi cho Gemini:
-- **`buildReportPrompt(evidenceJson, startDate, endDate)`:** Trả về chuỗi prompt tiếng Việt, bao gồm:
-  - Role & nhiệm vụ của Gemini.
-  - Cấu trúc báo cáo bắt buộc (6 sections).
-  - Quy tắc trình bày (Notion Markdown, emoji, heading H4, bảng).
-  - Mapping Opportunity Health.
-  - Kèm `evidenceJson` (Activities data).
+Ghép kỳ báo cáo và evidence JSON thành prompt tiếng Việt, yêu cầu sáu section, heading H4, bullet/bảng Notion Markdown và không thêm dữ kiện ngoài evidence.
 
----
+### `src/schedule-config.ts` và `src/schedule.ts`
 
-### `src/schedule-config.ts`
-Cấu hình lịch chạy (không chứa logic):
-- `triggerTimeZone`: `"Asia/Ho_Chi_Minh"`.
-- `triggerDay` / `triggerHour` / `triggerMinute`: Chủ nhật, 06:00.
-- `reportStartDay`: `MONDAY`, `reportEndDay`: `SATURDAY` — kỳ dữ liệu.
-- `weekOffset`: 0 (kỳ gần nhất; `-1` = lùi 1 tuần).
-- Export type `Weekday` — union type các ngày trong tuần.
+- Cấu hình lịch: Chủ nhật 06:00, timezone `Asia/Ho_Chi_Minh`.
+- Kỳ dữ liệu mặc định: thứ Hai đến thứ Bảy gần nhất.
+- `calculateScheduledReportPeriod()` lấy ngày hiện tại theo timezone, tính `startDate` và `endDate`, có hỗ trợ `weekOffset`.
 
----
+### `src/telegram.ts`
 
-### `src/schedule.ts`
-Logic tính toán kỳ báo cáo tự động:
-- **`calculateScheduledReportPeriod(now)`:** Dựa trên `scheduleConfig`, tính:
-  - `endDate`: thứ Bảy gần nhất (hoặc lùi theo `weekOffset`).
-  - `startDate`: thứ Hai bắt đầu kỳ đó.
-- Sử dụng `Intl.DateTimeFormat` để xử lý timezone chính xác.
-- Đọc `scheduleConfig` và dùng `addDays` từ `notion.ts`.
+- `sendTelegramMessage()` gọi Telegram Bot API `sendMessage`.
+- `sendWeeklyReportNotification()` gửi trạng thái thành công, kỳ báo cáo và URL Notion page.
+- API error được ném lên để `index.ts` ghi log; không làm report đã tạo bị coi là thất bại.
 
----
+## Luồng dữ liệu
 
-## Luồng dữ liệu tổng hợp
-
-```
-GitHub Actions (cron)
-  │  POST /webhook (HMAC signed)
-  ▼
+```text
+GitHub Actions (cron/manual)
+  -> POST body + HMAC
 Notion Worker (index.ts)
-  │  1. verifyScheduledWebhook()
-  │  2. calculateScheduledReportPeriod()
-  │  3. readActivities() → evidence JSON
-  │  4. buildReportPrompt() → prompt
-  │  5. generateGeminiText() → report markdown
-  │  6. createReportPage() → Notion page
-  ▼
-Gemini API (gemini.ts)
-  ← Trả về báo cáo Markdown
+  -> verify signature
+  -> calculate report period
+Notion Activities (notion.ts)
+  -> query + pagination + normalize
+Evidence + Writing Guide (report-guide.ts)
+  -> Gemini (gemini.ts)
+Report Markdown
+  -> Notion report page (notion.ts)
+  -> Telegram notification (telegram.ts)
 ```
 
+## Secrets
+
+- Worker: `NOTION_API_TOKEN`, `GEMINI_API_KEY`, `WORKER_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- GitHub Actions: `WORKER_WEBHOOK_URL`, `WORKER_WEBHOOK_SECRET`.
+- Không commit secret thật, `.env-telegram`, `.env` hoặc output build.

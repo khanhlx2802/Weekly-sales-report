@@ -1,5 +1,5 @@
 export const config = {
-  activitiesDataSourceId: "c38e8e415bae82c6ad01874268008095",
+  activitiesDataSourceId: "350e8e415bae80258eabd9938b2029d7",
   reportParentPageId: "3dce8e415bae80789eefc6be506cf22d",
   geminiModel: "gemini-3.6-flash",
   geminiEndpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
