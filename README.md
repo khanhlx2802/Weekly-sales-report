@@ -16,9 +16,9 @@ Notion Worker đọc Activities theo kỳ báo cáo, gửi JSON cùng Writing Gu
 - Chỉnh ngày tại `src/schedule-config.ts`.
 - Chỉnh giờ tại `.github/workflows/weekly-report.yml`.
 
-## Secrets
+## Secrets 
 
-Worker: `NOTION_API_TOKEN`, `GEMINI_API_KEY`, `WORKER_WEBHOOK_SECRET`.
+Worker: `NOTION_API_TOKEN`, `GEMINI_API_KEY`, `WORKER_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 GitHub Actions: `WORKER_WEBHOOK_URL`, `WORKER_WEBHOOK_SECRET`.
 
 ## Kiểm tra và deploy

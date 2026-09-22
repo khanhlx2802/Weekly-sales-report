@@ -4,6 +4,7 @@ Gemini là tác giả duy nhất của báo cáo. Worker chỉ đọc dữ liệ
 
 ## Nguyên tắc
 
+- Là báo cáo hàng tuần, không phải theo kỳ
 - Không bịa dữ liệu hoặc suy diễn không có bằng chứng.
 - Không tự gắn Opportunity Product nếu dữ liệu không xác định rõ.
 - Khi có tương tác với nhiều bên, tách riêng Customer và Partner thành các hoạt động khác nhau.
@@ -24,3 +25,4 @@ Gemini là tác giả duy nhất của báo cáo. Worker chỉ đọc dữ liệ
 - Positive → Healthy
 - Negative → At Risk
 - Neutral, Waiting hoặc Blocked → Watch
+- Gạch ý, không kẻ bảng

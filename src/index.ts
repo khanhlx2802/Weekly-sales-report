@@ -6,6 +6,7 @@ import { generateGeminiText, testGeminiAuthentication } from "./gemini.js"
 import { addDays, createReportPage, readActivities, validateDateOnly } from "./notion.js"
 import { buildReportPrompt } from "./report-guide.js"
 import { calculateScheduledReportPeriod } from "./schedule.js"
+import { sendWeeklyReportNotification } from "./telegram.js"
 
 const worker = new Worker()
 export default worker
@@ -41,10 +42,22 @@ async function generateReport(notion: any, startDate: string, endDate: string) {
     )
     if (!reportMarkdown.trim()) throw new Error("Gemini returned empty report content")
     const page = await createReportPage(notion, title, reportMarkdown)
+    let notificationSent = false
+    try {
+      notificationSent = await sendWeeklyReportNotification(
+        process.env.TELEGRAM_BOT_TOKEN ?? "",
+        process.env.TELEGRAM_CHAT_ID ?? "",
+        result.start,
+        result.end,
+        page.url ?? null,
+      )
+    } catch (error) {
+      console.error("Failed to send Telegram notification:", error instanceof Error ? error.message : String(error))
+    }
     return {
       status: "completed", pageId: page.id, pageUrl: page.url ?? null,
       startDate: result.start, endDate: result.end, totalActivities: result.activities.length,
-      startedAt, completedAt: new Date().toISOString(), notificationSent: false, outputInsertedUnchanged: true,
+      startedAt, completedAt: new Date().toISOString(), notificationSent, outputInsertedUnchanged: true,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
