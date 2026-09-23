@@ -7,7 +7,7 @@ import { buildLeadershipCalendarSection } from "./leadership-calendar.js"
 import { addDays, createReportPage, readActivities, readLeadershipCalendar, validateDateOnly } from "./notion.js"
 import { buildReportPrompt } from "./report-guide.js"
 import { calculateScheduledReportPeriod } from "./schedule.js"
-import { sendWeeklyReportNotification } from "./telegram.js"
+import { sendWeeklyReportFailureNotification, sendWeeklyReportNotification } from "./telegram.js"
 const worker = new Worker()
 export default worker
 function displayDate(dateOnly: string) { const [, month, day] = dateOnly.split("-"); return `${day}/${month}` }
@@ -31,7 +31,19 @@ async function generateReport(notion: any, startDate: string, endDate: string) {
     return { status: "completed", pageId: page.id, pageUrl: page.url ?? null, startDate: result.start, endDate: result.end, totalActivities: result.activities.length, calendarStartDate: result.calendarStart, calendarEndDate: result.calendarEnd, totalLeadershipEvents: result.leadershipEvents.length, startedAt, completedAt: new Date().toISOString(), notificationSent, geminiOutputInsertedUnchanged: true, calendarAppendedByWorker: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    try { await createReportPage(notion, `${title} — Failed`, `#### ❌ Tạo báo cáo thất bại\n\n- Kỳ dữ liệu: ${result.start} đến ${result.end}\n- Activities đã đọc: ${result.activities.length}\n- Lịch lãnh đạo đã đọc: ${result.leadershipEvents.length}\n- Lỗi: ${message}`) } catch {}
+    try {
+      await sendWeeklyReportFailureNotification(
+        process.env.TELEGRAM_BOT_TOKEN ?? "",
+        process.env.TELEGRAM_CHAT_ID ?? "",
+        result.start,
+        result.end,
+        result.activities.length,
+        result.leadershipEvents.length,
+        message,
+      )
+    } catch (telegramError) {
+      console.error("Failed to send Telegram failure notification:", telegramError instanceof Error ? telegramError.message : String(telegramError))
+    }
     throw error
   }
 }
