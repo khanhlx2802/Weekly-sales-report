@@ -22,9 +22,10 @@ Weekly-sales-report/
 ├── prompts/
 │   └── weekly-report-guide.md
 └── src/
-    ├── config.ts                 # Notion IDs, Gemini endpoints, retry config
+    ├── config.ts                 # Notion IDs, Gemini endpoints, timeout
     ├── gemini.ts                 # Gọi Gemini API
     ├── index.ts                  # Worker entry point, tools và webhook
+    ├── leadership-calendar.ts    # Dựng bảng lịch lãnh đạo
     ├── notion.ts                 # Đọc Activities và tạo report page
     ├── report-guide.ts           # Dựng prompt gửi Gemini
     ├── schedule-config.ts        # Ngày, giờ và timezone lịch chạy
@@ -71,12 +72,12 @@ Mô tả luồng GitHub Actions -> Notion Worker -> Notion Activities -> Gemini 
 Giải thích cron UTC, kỳ dữ liệu thứ Hai đến thứ Bảy và hai GitHub Actions secrets cần cấu hình.
 
 ### `prompts/weekly-report-guide.md`
-Writing Guide quy định Gemini là tác giả duy nhất của báo cáo, không bịa dữ liệu và phải trả về Notion-flavored Markdown với sáu section bắt buộc.
+Writing Guide quy định Gemini là tác giả duy nhất của báo cáo, không bịa dữ liệu và phải trả về Notion-flavored Markdown với năm section bắt buộc. Prompt runtime hiện được dựng trong `src/report-guide.ts`.
 
 ## Source files
 
 ### `src/config.ts`
-Chứa `activitiesDataSourceId`, `reportParentPageId`, model và endpoint Gemini, timeout 70 giây, retry tối đa 2 lần và delay 5 giây. Notion IDs là resource IDs, không phải secret.
+Chứa các Notion resource ID, model và endpoint Gemini cùng timeout mỗi request 70 giây. Notion IDs là resource IDs, không phải secret.
 
 ### `src/index.ts`
 Khởi tạo Worker và đăng ký:
@@ -90,8 +91,8 @@ Khởi tạo Worker và đăng ký:
 
 Các hàm chính:
 
-- `collectEvidence()`: validate ngày, đọc Activities và đóng gói evidence JSON.
-- `generateReport()`: gọi Gemini, tạo page Notion, rồi gửi Telegram. Nếu Gemini hoặc Notion thất bại thì cố tạo page `{title} — Failed`; lỗi Telegram chỉ được log.
+- `collectEvidence()`: validate ngày, đọc Activities và lịch lãnh đạo song song, rồi đóng gói evidence JSON.
+- `generateReport()`: gọi Gemini, ghép lịch lãnh đạo, tạo page Notion, rồi gửi Telegram. Nếu Gemini hoặc Notion thất bại thì gửi thông báo lỗi nếu Telegram được cấu hình; lỗi Telegram chỉ được log.
 - `verifyScheduledWebhook()`: kiểm tra header `x-weekly-report-signature` bằng timing-safe comparison.
 
 ### `src/notion.ts`
@@ -102,12 +103,17 @@ Các hàm chính:
 - Chuẩn hóa title, rich text, date, select, status, people, relation và các property Notion khác.
 - Tạo report page dưới `reportParentPageId` bằng Markdown.
 
+### `src/leadership-calendar.ts`
+
+- Dựng bảng Markdown lịch lãnh đạo từ dữ liệu Notion.
+- Hiển thị thời gian, sự kiện, người lãnh đạo, trạng thái, địa điểm và link Calendar live.
+
 ### `src/gemini.ts`
 
 - Đọc `GEMINI_API_KEY` từ environment.
 - Gửi system instruction và evidence prompt đến Gemini.
 - Trích xuất text từ các dạng response khác nhau.
-- Retry lỗi `429`, `500`, `502`, `503`, `504`; mỗi lần có timeout 70 giây.
+- Mỗi request có timeout 70 giây. Source hiện tại không retry tự động.
 - `testGeminiAuthentication()` kiểm tra API key bằng auth endpoint.
 
 ### `src/report-guide.ts`
@@ -133,11 +139,11 @@ GitHub Actions (cron/manual)
 Notion Worker (index.ts)
   -> verify signature
   -> calculate report period
-Notion Activities (notion.ts)
+Notion Activities + Leadership Calendar (notion.ts)
   -> query + pagination + normalize
 Evidence + Writing Guide (report-guide.ts)
   -> Gemini (gemini.ts)
-Report Markdown
+Report Markdown + Leadership Calendar (leadership-calendar.ts)
   -> Notion report page (notion.ts)
   -> Telegram notification (telegram.ts)
 ```
