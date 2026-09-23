@@ -74,6 +74,7 @@ export async function readActivities(notion: any, startDate: string, endDate: st
 export async function createReportPage(notion: any, title: string, markdown: string) {
   return notion.pages.create({
     parent: { page_id: config.reportParentPageId },
+    icon: { type: "emoji", emoji: "📊" },
     properties: { title: { title: [{ text: { content: title } }] } },
     markdown,
   })
