@@ -1,4 +1,5 @@
 import crypto from "crypto"
+import { runLoggedApi } from "./api-log.js"
 import { Worker, WebhookVerificationError } from "@notionhq/workers"
 import { j } from "@notionhq/workers/schema-builder"
 import { config } from "./config.js"
@@ -15,7 +16,7 @@ async function collectEvidence(notion: any, startDate: string, endDate: string) 
   const start = validateDateOnly(startDate), end = validateDateOnly(endDate)
   if (start > end) throw new Error("startDate must not be after endDate")
   const calendarStart = addDays(end, 2), calendarEnd = addDays(end, 7)
-  const [activities, leadershipEvents] = await Promise.all([readActivities(notion, start, end), readLeadershipCalendar(notion, calendarStart, calendarEnd)])
+  const [activities, leadershipEvents] = await Promise.all([runLoggedApi("Notion Query Activities", () => readActivities(notion, start, end)), runLoggedApi("Notion Query Leadership Calendar", () => readLeadershipCalendar(notion, calendarStart, calendarEnd))])
   const evidence = { reportPeriod: { startDate: start, endDate: end }, nextPeriod: { startDate: calendarStart, endDate: calendarEnd }, source: { database: "Activities", dataSourceId: config.activitiesDataSourceId }, totalActivities: activities.length, activities }
   return { start, end, calendarStart, calendarEnd, activities, leadershipEvents, evidence, evidenceJson: JSON.stringify(evidence, null, 2) }
 }
@@ -25,7 +26,7 @@ async function generateReport(notion: any, startDate: string, endDate: string) {
     const reportMarkdown = await generateGeminiText(buildReportPrompt(result.evidenceJson, result.start, result.end), "Bạn chịu trách nhiệm về phần phân tích của báo cáo. Không viết mục lịch lãnh đạo; Worker sẽ chèn lịch thật từ Notion sau phần phân tích.")
     if (!reportMarkdown.trim()) throw new Error("Gemini returned empty report content")
     const calendarMarkdown = buildLeadershipCalendarSection(result.leadershipEvents, result.calendarStart, result.calendarEnd, config.leadershipCalendarViewUrl)
-    const page = await createReportPage(notion, title, `${reportMarkdown.trim()}\n\n---\n\n${calendarMarkdown}`)
+    const page = await runLoggedApi("Notion Create Report Page", () => createReportPage(notion, title, `${reportMarkdown.trim()}\n\n---\n\n${calendarMarkdown}`))
     let notificationSent = false
     try { notificationSent = await sendWeeklyReportNotification(process.env.TELEGRAM_BOT_TOKEN ?? "", process.env.TELEGRAM_CHAT_ID ?? "", result.start, result.end, page.url ?? null) } catch (error) { console.error("Failed to send Telegram notification:", error instanceof Error ? error.message : String(error)) }
     return { status: "completed", pageId: page.id, pageUrl: page.url ?? null, startDate: result.start, endDate: result.end, totalActivities: result.activities.length, calendarStartDate: result.calendarStart, calendarEndDate: result.calendarEnd, totalLeadershipEvents: result.leadershipEvents.length, startedAt, completedAt: new Date().toISOString(), notificationSent, geminiOutputInsertedUnchanged: true, calendarAppendedByWorker: true }
