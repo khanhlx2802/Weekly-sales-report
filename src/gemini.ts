@@ -17,19 +17,20 @@ export async function generateGeminiText(prompt: string, systemInstruction: stri
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured")
   let lastError: unknown
   for (let attempt = 1; attempt <= config.geminiMaxAttempts; attempt++) {
+    const model = config.geminiModels[Math.min(attempt - 1, config.geminiModels.length - 1)]
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), config.geminiAttemptTimeoutMs)
     try {
       const response = await fetch(config.geminiEndpoint, {
         method: "POST",
         headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({ model: config.geminiModel, input: `${systemInstruction}\n\n${prompt}` }),
+        body: JSON.stringify({ model, input: `${systemInstruction}\n\n${prompt}` }),
         signal: controller.signal,
       })
       const raw = await response.text()
       const payload = raw ? JSON.parse(raw) : {}
       if (!response.ok) {
-        const error = new Error(`Gemini request failed (${response.status}): ${raw}`)
+        const error = new Error(`Gemini request failed for ${model} (${response.status}): ${raw}`)
         if (temporaryStatus(response.status) && attempt < config.geminiMaxAttempts) {
           lastError = error
           await wait(config.geminiRetryDelayMs)
@@ -38,8 +39,8 @@ export async function generateGeminiText(prompt: string, systemInstruction: stri
         throw error
       }
       const output = extractText(payload)
-      if (!output) throw new Error("Gemini returned empty report content")
-      return output
+      if (!output) throw new Error(`Gemini returned empty report content from ${model}`)
+      return { output, model, attempt }
     } catch (error) {
       const isTemporaryNetworkError = error instanceof TypeError || (error instanceof Error && error.name === "AbortError")
       if (isTemporaryNetworkError && attempt < config.geminiMaxAttempts) {
@@ -59,5 +60,5 @@ export async function testGeminiAuthentication() {
   const response = await fetch(config.geminiAuthEndpoint, { headers: { "x-goog-api-key": apiKey } })
   const body = await response.text()
   if (!response.ok) throw new Error(`Gemini authentication failed (${response.status}): ${body}`)
-  return { connected: true, model: config.geminiModel }
+  return { connected: true, models: config.geminiModels }
 }
