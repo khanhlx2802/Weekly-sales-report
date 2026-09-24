@@ -5,7 +5,7 @@ export const config = {
   leadershipCalendarViewId: "6bf6f3a3b27d469c857ba5c0b3cdc2ae",
   leadershipCalendarViewUrl: "https://www.notion.so/4a22802c26cc49f8821421a78f85c117?v=6bf6f3a3b27d469c857ba5c0b3cdc2ae",
   reportParentPageId: "3dce8e415bae80789eefc6be506cf22d",
-  geminiModels: ["gemini-3.6-flash", "gemini-3.6-flash-lite"],
+  geminiModels: ["gemini-3.6-flash", "gemini-3.1-flash-lite"],
   geminiEndpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
   geminiAuthEndpoint: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=100",
   geminiAttemptTimeoutMs: 70_000,
