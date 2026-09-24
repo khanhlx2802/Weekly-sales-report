@@ -60,5 +60,5 @@ export async function testGeminiAuthentication() {
   const response = await fetch(config.geminiAuthEndpoint, { headers: { "x-goog-api-key": apiKey } })
   const body = await response.text()
   if (!response.ok) throw new Error(`Gemini authentication failed (${response.status}): ${body}`)
-  return { connected: true, models: config.geminiModels }
+  return { connected: true, models: [...config.geminiModels] }
 }
