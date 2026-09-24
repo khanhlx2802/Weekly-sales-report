@@ -9,4 +9,6 @@ export const config = {
   geminiEndpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
   geminiAuthEndpoint: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
   geminiAttemptTimeoutMs: 70_000,
+  geminiMaxAttempts: 2,
+  geminiRetryDelayMs: 15_000,
 } as const

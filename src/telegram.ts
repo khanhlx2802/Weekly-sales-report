@@ -20,9 +20,9 @@ export function sendWeeklyReportNotification(token: string, chatId: string, star
 }
 
 function describeReportError(message: string) {
-  if (/429|rate limit|too_many_requests|quota/i.test(message)) return "Gemini đã hết hoặc chạm giới hạn quota. Worker đã dừng và không retry tự động."
-  if (/503|service_unavailable|high demand/i.test(message)) return "Gemini đang quá tải hoặc tạm thời không khả dụng. Worker đã dừng và không retry tự động."
-  if (/abort|timeout/i.test(message)) return "Gemini phản hồi quá thời gian cho phép. Worker đã dừng và không retry tự động."
+  if (/429|rate limit|too_many_requests|quota/i.test(message)) return "Gemini đã hết hoặc chạm giới hạn quota. Worker dừng ngay và không retry lỗi quota ngày."
+  if (/503|service_unavailable|high demand/i.test(message)) return "Gemini đang quá tải hoặc tạm thời không khả dụng. Worker đã thử tối đa 2 lần rồi dừng."
+  if (/abort|timeout/i.test(message)) return "Gemini phản hồi quá thời gian. Worker đã thử tối đa 2 lần rồi dừng."
   if (/GEMINI_API_KEY/i.test(message)) return "Gemini API key chưa được cấu hình hoặc không hợp lệ."
   return `Worker gặp lỗi: ${message.slice(0, 500)}`
 }
